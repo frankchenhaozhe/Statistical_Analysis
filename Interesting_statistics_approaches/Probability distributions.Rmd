@@ -1,0 +1,114 @@
+---
+title: "Probability Distributions"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Compute probabilties 
+```{r}
+# X ~ N(0.05, (0.10)^2)
+mu_x <-0.05
+sigma_x <- 0.1
+
+# Pr(X > 0.10)
+1-pnorm(0.1,mu_x,sigma_x)
+
+# Pr(X < -0.10)
+pnorm(-0.1,mu_x,sigma_x)
+
+# Pr(-0.05 < X < 0.15)
+pnorm(0.15,mu_x,sigma_x)-pnorm(-0.05,mu_x,sigma_x)
+
+```
+
+## Quantiles
+```{r}
+# 1%, 5%, 95% and 99% quantile (the quantile of CDF)
+qnorm(c(0.01,0.05,0.95,0.99),mu_x,sigma_x)
+```
+
+## Probability densities
+```{r}
+# Compute the probability desity of the vector x in under a normal PDF
+x <- seq(-0.25, 0.35, length.out = 100)
+d1 <- dnorm(x,0.05,0.10)
+d2 <- dnorm(x,0.025,0.05)
+
+# Plot the normal curves
+plot(x,d1,type='l',col='blue',ylab='Normal curves',ylim=c(0,8))
+lines(x,d2,col='red')
+# Add a plot legend
+legend("topleft", legend = c("density1", "density2"), 
+       col = c("blue", "red"), lty = 1)
+
+```
+
+## Determine the value-at-risk(VaR) of returns
+Assume that the simple monthly return R is normally distributed with a mean 0.04 and a variance (0.09)^2. The initial wealth to be invested over the month is $100,000.
+```{r}
+# R ~ N(0.04, (0.09)^2) 
+mu_R <- 0.04
+sigma_R <- 0.09
+
+# Initial wealth W0 equals $100,000
+W0 <- 100000
+
+# The 1% value-at-risk
+# The loss in investment value that may occur over the next month with a 1% probability
+qnorm(0.01,mu_R,sigma_R)*W0
+
+# The 5% value-at-risk
+# The loss in investment value that may occur over the next month with a 5% probability
+qnorm(0.05,mu_R,sigma_R)*W0
+
+```
+
+Assume that the log monthly return r is normally distributed with a mean 0.04 and a variance (0.09)^2. The initial wealth to be invested over the month is 100,000. Remember the transmutations: $r_t=log(R_t+1); R_t=exp(r_t)-1$
+```{r}
+# r ~ N(0.04, (0.09)^2) 
+mu_r <- 0.04
+sigma_r <- 0.09
+
+# The 1% value-at-risk of simple return 
+(exp(qnorm(0.01,mu_r,sigma_r))-1)*W0
+
+# The 5% value-at-risk simple return 
+(exp(qnorm(0.05,mu_r,sigma_r))-1)*W0
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

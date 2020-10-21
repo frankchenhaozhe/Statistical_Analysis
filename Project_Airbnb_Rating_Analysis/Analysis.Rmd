@@ -1,0 +1,617 @@
+---
+title: "Airbnb in Boston"
+subtitle: " "
+author: "Haozhe Chen"
+date: "Dec 05, 2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,out.width="0.9\\linewidth",dev="pdf",fig.align  = 'center')
+pacman::p_load("tidyverse",
+               "ggExtra",
+               "knitr",
+               "arm",
+               "data.table",
+               "foreign",
+               "car",
+               "faraway",
+               "nnet",
+               "reshape2",
+               "VGAM",
+               "dplyr",
+               "foreign",
+               "tidyr",
+               "plyr",
+               "stringr",
+               "tidytext",
+               "readr",
+               "wordcloud",
+               "lubridate",
+               "gridExtra")
+```
+
+# Abstract 
+This project mainly focuses on the review data and the hotel lists and from Airbnb official website in the effort to understand which factors could have potentially affected the reviews and comments. Understanding the reviews is important for both travelers and hosts, since travelers want to know which rooms are potentially better and house hosts could enhance their competitiveness. From several different features, such as locations, room types, and hosts, I started with Exploratary Data Analysis and then utilized different statistical models to explore the potential relationships between the ratings and features. I also analyzed the text comments, which has always been a crucial part of feedback in any kind of business because it could reflect the emotions of customers. 
+
+# Introduction
+## Background
+Airbnb is a non-traditional way to connect guests looking for accommodations to hosts looking to rent their properties on both a short-term or long-term basis. Airbnb has steadily risen in terms of revenue growth and its range of service provisions. As of 2019, there 150 million users of Airbnb services in 191 countries, making it a major disruptor of the traditional hospitality industry (this is akin to how Uber and other emerging transportation services have disrupted the traditional intra-city transportation services). Airbnb generates revenue by charging its guests and hosts fees for arranging stays: hosts are charged 3% of the value of the booking, while guests are charged 6%-12% per the nature of the booking. As a rental ecosystem, Airbnb generates tons of data including but not limited to: density of rentals across regions (cities and neighborhoods), price variations across rentals, host-guest interactions in the form of reviews, and so forth. \par
+One of the main reference for most people of choosing a hotel or apartment was the reviews and they should pay more attention to high-rating apartments I'm always interested in what factors could play a role and make diffferent rooms end up with different level of ratings. It might be locations, quality, or the consistency of the description. In this project, I am going to explore both the numerical data and text reviews, and try to look for interesting features in the business side. \par
+
+# Method
+## Data Source
+I used the dataset of Boston Airbnb room lists and review lists. The raw data used on this project is taken from Inside Airbnb(Link:http://insideairbnb.com/get-the-data.html).\par
+For sentiment analysis, this project used bing dictionary from (https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html). It categories words with positive and negative attitudes to binary scores.\par
+
+```{r, message = FALSE, echo=FALSE}
+# Data importing
+hosts_raw <- readr::read_csv("./BostonAirbnb/listings 2.csv") %>%
+  dplyr::select(id,name,host_response_time,host_response_rate,host_is_superhost,host_total_listings_count)
+
+locations_raw <- readr::read_csv("./BostonAirbnb/listings 2.csv")%>%
+  dplyr::select(id,city,neighbourhood_cleansed,latitude,longitude,is_location_exact,smart_location)
+
+overviews_raw <- readr::read_csv("./BostonAirbnb/listings 2.csv")%>%
+  dplyr::select(id,property_type,room_type,accommodates,bathrooms,bedrooms,beds,summary,space,description,notes,house_rules,
+                neighbourhood_cleansed,neighborhood_overview,amenities)
+
+policies_raw <- readr::read_csv("./BostonAirbnb/listings 2.csv")%>%
+  dplyr::select(id,instant_bookable,cancellation_policy,require_guest_profile_picture)
+
+prices_raw <- readr::read_csv("./BostonAirbnb/listings 2.csv")%>%
+  dplyr::select(id,price,weekly_price,monthly_price,security_deposit,cleaning_fee,guests_included,extra_people)
+
+reviews_raw <- readr::read_csv("./BostonAirbnb/listings 2.csv")%>%
+  dplyr::select(id,number_of_reviews,reviews_per_month,first_review,last_review,
+                               review_scores_rating,review_scores_accuracy,review_scores_cleanliness,
+                               review_scores_checkin,review_scores_communication,review_scores_location,
+                               review_scores_value)
+```
+
+```{r, message = FALSE, warning=FALSE,echo=FALSE}
+# Data clearning
+# get tidy reviews
+reviews_raw$ratings <- cut(reviews_raw$review_scores_rating,
+                       breaks = c(20,30,40,50,60,70,80,85,90,95,100),
+                       labels = c("1", "2", "3", "4","5","6","7","8","9","10"),
+                       right  = T)
+tidy_reviews <- reviews_raw %>% 
+  dplyr::filter(!is.na(ratings))
+colnames(tidy_reviews)[6]<-"ratings_original"
+
+# get boroughs in the location dataset
+locations_raw$boroughs<-locations_raw$neighbourhood_cleansed
+revalue(locations_raw$boroughs, c("Downtown" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Back Bay" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("North End" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("South End" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Beacon Hill" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Fenway" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("West End" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Chinatown" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Leather District" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Bay Village" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Longwood Medical Area" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("Mission Hill" = "Boston")) -> locations_raw$boroughs
+revalue(locations_raw$boroughs, c("South Boston Waterfront" = "South Boston")) -> locations_raw$boroughs
+
+# get tidy locations
+tidy_locations <- left_join(tidy_reviews,locations_raw,by="id")
+colnames(tidy_locations)[15]<-"neighbourhood"
+# filter out the city of Boston and other boroughs
+tidy_locations_bos <-tidy_locations%>% filter(boroughs=="Boston")
+tidy_locations_others<-tidy_locations%>% filter(boroughs!="Boston")
+
+# get cleansed price 
+prices_raw$price <- str_replace_all(prices_raw$price,fixed("$"),"")
+prices_raw$price <- as.numeric(gsub(",", "", as.character(prices_raw$price)))
+prices_raw$weekly_price <- str_replace_all(prices_raw$weekly_price,fixed("$"),"")
+prices_raw$weekly_price <- as.numeric(gsub(",", "", as.character(prices_raw$weekly_price)))
+prices_raw$monthly_price <- str_replace_all(prices_raw$monthly_price,fixed("$"),"")
+prices_raw$monthly_price <- as.numeric(gsub(",", "", as.character(prices_raw$monthly_price)))
+prices_raw$security_deposit <- str_replace_all(prices_raw$security_deposit,fixed("$"),"")
+prices_raw$security_deposit <- as.numeric(gsub(",", "", as.character(prices_raw$security_deposit)))
+prices_raw$cleaning_fee <- str_replace_all(prices_raw$cleaning_fee,fixed("$"),"")
+prices_raw$cleaning_fee <- as.numeric(gsub(",", "", as.character(prices_raw$cleaning_fee)))
+prices_raw$extra_people <- str_replace_all(prices_raw$extra_people,fixed("$"),"")
+prices_raw$extra_people <- as.numeric(gsub(",", "", as.character(prices_raw$extra_people)))
+
+# get tidy price
+tidy_price <- left_join(tidy_reviews,prices_raw,by="id")
+
+# get tidy hosts
+hosts_raw$host_response_rate <- as.integer(gsub("%","",hosts_raw$host_response_rate))
+tidy_hosts <- left_join(tidy_reviews,hosts_raw,by="id")
+tidy_hosts$host_is_superhost<-as.factor(tidy_hosts$host_is_superhost)
+colnames(tidy_hosts)[which(names(tidy_hosts) == "host_is_superhost")] <- "Superhost"
+
+# get tidy text of comments and descriptions
+tidy_comments <- readr::read_csv("./BostonAirbnb/reviews.csv.gz") %>% 
+  group_by(listing_id) %>% 
+  unnest_tokens(word,comments) %>% 
+  anti_join(stop_words)%>%
+  ungroup() %>%
+  dplyr::select(-id)
+colnames(tidy_comments)[1]<-"id"
+
+tidy_description <- overviews_raw %>%
+  group_by(id) %>%
+  unnest_tokens(word,description) %>%
+  anti_join(stop_words)%>%
+  ungroup() %>%
+  dplyr::select(id,property_type,room_type,neighbourhood_cleansed,word)
+
+# get tidy polices
+revalue(policies_raw$cancellation_policy, c("super_strict_30" = "super strict")) -> policies_raw$cancellation_policy
+revalue(policies_raw$cancellation_policy, c("super_strict_60" = "super strict")) -> policies_raw$cancellation_policy
+revalue(policies_raw$cancellation_policy, c("strict_14_with_grace_period" = "strict")) -> policies_raw$cancellation_policy
+tidy_polices <- left_join(tidy_reviews,policies_raw,by = "id")
+
+# get tidy overviews
+tidy_overviews <- left_join(tidy_reviews,overviews_raw[,c(1:7)],by="id")
+
+```
+
+## Exploratory Data Analysis
+1) Histogram of Ratings
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+# the distribution of ratings
+tidy_locations %>% 
+  dplyr::count(ratings) %>%
+  ggplot(aes(ratings,n))+
+  geom_bar(stat="identity", width=.7, fill="tomato3")+
+  labs(title="Ratings Distributions in Great Boston",
+       x="Ratings",
+       y="Count") + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) -> v1.1
+
+# the distribution of ratings in Boston (Downtown, back bay, Fenway....)
+tidy_locations_bos %>% 
+  dplyr::count(ratings) %>%
+  ggplot(aes(ratings,n))+
+  geom_bar(stat="identity", width=.7, fill="tomato3")+
+  labs(title="Ratings Distributions in Boston",
+       x="Ratings",
+       y="Count") + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) -> v1.2
+
+# the distribution of ratings in sorrouding areas (south Boston, Allston, Brighton...)
+tidy_locations_others %>% 
+  dplyr::count(ratings) %>%
+  ggplot(aes(ratings,n))+
+  geom_bar(stat="identity", width=.7, fill="tomato3")+
+  labs(title="Ratings Distributions in different boroughs",
+       x="Ratings",
+       y="Count") + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) -> v1.3
+
+gridExtra::grid.arrange(v1.1,v1.2,v1.3, ncol=2)
+
+```
+\par
+From the visualization, we could see that people tend to give higher rating scores in general. Almost no people give ratings below 60% percent of the overall weighted score. But we should be careful with the results because it may not reflect the real thought of costumers and we do not know how they get the rating scores in the survey. \par
+
+2) Demographic Distribution of Ratings 
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+tidy_locations %>% 
+  dplyr::count(boroughs,ratings) %>%
+  ggplot(aes(boroughs,n,fill=ratings))+ 
+  scale_fill_brewer(palette = "Spectral")+
+  geom_bar(stat="identity",width = .5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Rating number in different cities", 
+       x="Boroughs",
+       y="Rating numbers") -> v2.1
+
+tidy_locations %>% 
+  dplyr::count(boroughs,ratings) %>%
+  dplyr::group_by(boroughs) %>% 
+  dplyr::mutate(total=sum(n)) %>%
+  dplyr::mutate(perc=n/total) %>% 
+  ggplot(aes(boroughs,perc*100,fill=ratings))+ 
+  scale_fill_brewer(palette = "Spectral")+
+  geom_bar(stat="identity",width = .5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Rating perc in different cities", 
+       x="Boroughs",
+       y="Rating percentage") -> v2.2
+
+tidy_locations_bos %>% 
+  dplyr::count(neighbourhood,ratings) %>%
+  ggplot(aes(neighbourhood,n,fill=ratings))+ 
+  scale_fill_brewer(palette = "Spectral")+
+  geom_bar(stat="identity",width = .5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Rating number in different neighbourhood", 
+       x="Neighbourhood",
+       y="Ratings number") -> v2.3
+
+tidy_locations_bos %>%
+  dplyr::count(neighbourhood,ratings) %>%
+  dplyr::group_by(neighbourhood) %>% 
+  dplyr::mutate(total=sum(n)) %>%
+  dplyr::mutate(perc=n/total) %>%
+  ggplot(aes(neighbourhood,perc*100,fill=ratings))+ 
+  scale_fill_brewer(palette = "Spectral")+
+  geom_bar(stat="identity",width = .5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Rating perc in different neighbourhood", 
+       x="Neighbourhood",
+       y="Rating percentage") -> v2.4
+
+gridExtra::grid.arrange(v2.1, v2.2,ncol=2)
+gridExtra::grid.arrange(v2.3, v2.4,ncol=2)
+
+```
+\par
+From the plot above, we could see that the Boston city has overwhelmingly more reviews than other boroughs, but the percentage of 10 scores is lower than other boroughs. And the Charlestown, Roslindale, Jamaica Plain have the highest ratings in general.  In the city of Boston, Longwood Medical Area and Leather District have received better ratings. On the other hand, Chinatown and Downtown have the lowest ratings in general. (This makes sense because of the living quality are lower and downtown due to the compact space, louder noise and higher prices) \par
+
+3) The demographic differences in negative and positive reviews 
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+tidy_comments_locations <- left_join(tidy_comments,tidy_locations,by="id") %>%
+  inner_join(get_sentiments("bing"),by="word")
+
+tidy_comments_locations %>%
+  dplyr::count(neighbourhood,sentiment)%>%
+  spread(sentiment,n)%>%
+  dplyr::mutate(ratio=positive / negative, neighbourhood = reorder(neighbourhood, ratio)) %>%
+  ggplot(aes(neighbourhood,ratio)) +
+  geom_point() +
+  coord_flip()
+
+```
+\par This plot indicate that there are some difference of the sentiment in different neigbourhoods. Downtown and Chinatown have the lowest ratio of positive comments to negative comments, which correspond to the previous analysis. \par
+
+4) Distribution of Ratings in Room Types
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+tidy_overviews %>%
+  dplyr::count(room_type,ratings) %>%
+  ggplot(aes(room_type,n,fill=ratings))+ 
+  scale_fill_brewer(palette = "Spectral")+
+  geom_bar(stat="identity",width = .5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="The number of ratings in different room types", 
+       x="Room types",
+       y="Number of Ratings") -> v3.1
+
+tidy_overviews%>%
+  dplyr::count(room_type,ratings) %>%
+  dplyr::group_by(room_type) %>% 
+  dplyr::mutate(total=sum(n)) %>%
+  dplyr::mutate(perc=n/total) %>%
+  ggplot(aes(room_type,perc*100,fill=ratings))+ 
+  scale_fill_brewer(palette = "Spectral")+
+  geom_bar(stat="identity",width = .5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="The percentage of ratings in different room types", 
+       x="Room types",
+       y="Rating percentage") -> v3.2
+
+gridExtra::grid.arrange(v3.1, v3.2,ncol=2)
+
+```
+\par
+This plot indicates that there are more apartments and private rooms in the provided by Airbnb hosts. Also, hotel rooms are less popular than the other types of rooms, this more or less indicated that people who choose Airbnb are willing to look for some home-liked place to live rather than a traditional hotel.\par
+
+5) Relationship of Hosts and Rating
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+superhost <- tidy_hosts %>%
+ggplot(aes(host_response_rate,ratings_original,color=Superhost))+
+  geom_point(alpha = .8,stroke=0,na.rm = T) +
+  xlab("Host Response Rate") +
+  ylab("Avg Ratings")+ 
+  ggtitle("What does it take to be a Super Host")
+
+superhost + ggtitle("What does it take to be a Superhost?",
+          subtitle = "Average Rating by Response Rate") +
+  theme(plot.title = element_text(face = "bold")) +
+  theme(plot.subtitle = element_text(face = "bold", color = "grey35")) +
+  theme(plot.caption = element_text(color = "grey68"))
+
+```
+\par
+Airbnb awards the title of “Superhost” to a small fraction of its dependable hosts. This is designed as an incentive program that is a win-win for both the host, Airbnb, and their customers. The super hosts get more business in the form of higher bookings, the customer gets improved service and Airbnb gets happy satisfied customers. In this part, take a look at the plot of some attributes of hosts vs rating scores. There is no obvious relationship between rating scores and the host response rate. Take a clear examination of the blue plot, it indicates that the hosts are super hosts, and it is clear that they tend to get higher ratings than those who are not not super hosts.\par
+
+6) Sentiment over time
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+sentiment_by_time <- tidy_comments %>%
+  dplyr::mutate(date = floor_date(date, unit = "3 months")) %>%
+  group_by(date) %>%
+  dplyr::mutate(total_words=n()) %>%
+  ungroup() %>%
+  inner_join(get_sentiments("nrc"),by="word")
+
+sentiment_by_time %>%
+  dplyr::filter(sentiment=="positive"|sentiment=="negative") %>%
+  dplyr::count(date,sentiment,total_words) %>%
+  ungroup() %>%
+  dplyr::mutate(percent = n / total_words) %>%
+  ggplot(aes(date,percent,color=sentiment))+
+  geom_line(size=0.5) +
+  geom_smooth(method = "lm", se = FALSE, lty = 2) +
+  expand_limits(y=0)
+
+```
+\par Interestingly, the number of positive reviews get fewer from 2010 to 2018, and the negative review comments have not changed a lot.\par
+
+## Statistical analysis
+The outcome can be identified as either 10 levels (ratings) and continuous numbers (original ratings), the predictors include locations, hosts, prices, room types and the percentage of positive words in text comments. For the categorical outcome, binomial or multinomial regression are good selections. I have also considered Poisson regression in this project, since the ten levels can be also identified as 10 counts, each level add 1 to the original scale; however it cannot input some variables and it is less interpretable than binomial models in this case, I exclueded it. For the continuous numbers, linear regression is also a good choice, also, some different groups in the dataset, such as ids, hosts, neighborhoods, cities.. can be treatment as random effects. Through consideration and examination, I have figured that neighborhoods may have the best group effect because in this project each observation represents an individual property, the ratings are the average ratings for these properties.\par
+
+```{r, message=FALSE, echo=FALSE}
+# data wrangling
+df1 <- tidy_locations %>% dplyr::select(id,number_of_reviews,ratings_original,ratings,neighbourhood,boroughs,is_location_exact)
+df2 <- tidy_hosts %>% dplyr::select(id,host_response_rate,Superhost)
+df3 <- tidy_price %>% dplyr::select(id,price,cleaning_fee)
+df4 <- tidy_overviews %>% dplyr::select(id,room_type)
+
+df5 <- tidy_comments %>% 
+  inner_join(get_sentiments("bing"),by="word") %>% 
+  dplyr::count(id,sentiment) %>%
+  spread(sentiment,n)
+
+model.df<-left_join(left_join(left_join(left_join(df1,df2),df3),df4),df5) %>%
+  dplyr::mutate(positve_perc=positive/(positive+negative))
+
+
+model.df$neighbourhood <- as.factor(model.df$neighbourhood)
+
+model.df.bin <- model.df %>% 
+  dplyr::mutate(ratings_bin=if_else(model.df$ratings == "10", 1, 0))
+
+model.df<-na.omit(model.df)
+model.df.bin<-na.omit(model.df.bin)
+```
+
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+# fit multinomial model
+fit.1 <- polr(ratings~neighbourhood+price+cleaning_fee+room_type+host_response_rate+Superhost+positve_perc+is_location_exact, data=model.df)
+
+# fit binomial model
+fit.2 <- glm(ratings_bin~neighbourhood+number_of_reviews+price+cleaning_fee+room_type+host_response_rate+Superhost+positve_perc+is_location_exact, data = model.df.bin, family = binomial(link="logit"))
+# add random effect 
+fit.3 <- glmer(ratings_bin~scale(number_of_reviews)+(1|neighbourhood)+scale(price)+scale(cleaning_fee)+room_type+host_response_rate+Superhost+scale(positve_perc)+is_location_exact, data = model.df.bin, family = binomial(link="logit"))
+
+
+# fit simple linear regression model
+fit.4 <- lm(ratings_original ~number_of_reviews+neighbourhood+price+cleaning_fee+room_type+host_response_rate+Superhost+positve_perc+is_location_exact,data = model.df)
+# add random effect 
+fit.5 <- lmer(ratings_original ~(1|neighbourhood)+number_of_reviews+price+cleaning_fee+room_type+host_response_rate+Superhost+positve_perc+is_location_exact,data = model.df)
+
+```
+
+## Model Comparison
+The BIC and AIC suggest that the binomial model is better.
+```{r,warning=FALSE,error=FALSE,echo=FALSE}
+
+BIC(fit.1,fit.2,fit.3,fit.4,fit.5)
+AIC(fit.1,fit.2,fit.3,fit.4,fit.5) 
+
+```
+\par The pooling model is better.
+```{r,warning=FALSE,error=FALSE,echo=FALSE}
+anova(fit.2,fit.3)
+```
+
+# Result
+## Model Selection
+The binomial model with random effect is seleceted to interpret
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+arm::display(fit.3)
+```
+## Interpretation
+For the fixed part, the rating scores of reviews are not likely to be affected by the price of the cleaning fee. The baseline for the room type is the apartment. Compared to the baseline, on average the hotel room decreases 2 scores in the 100-score rating standard, the private room only decreases 0.38, in other words, there is no big difference, the shared room decreases 0.61 scores on average. For the host, if they respond faster, they tend to get better ratings, but not too much, since the coefficient is only 0.08; however, if the host is a super host, the chance of getting a will improve significantly, they 5 times chances than those who are not super hosts. But, we still need to be careful because the number of super hosts may not be large enough to explain the difference. The non-super are hosts are the majority. \par
+For the random effect,  $\sigma_{\alpha}^2 : \sigma_{y}^2 = 0.33^2 : 4.98^2 = 0.004391058$, the variance among the average rating scores of the different neighborhoods is lower than the within-neighborhood variance in rating scores measurements, which means the pooling effect is strong and the overall estimate is more reliable. \par
+
+## Model Checking
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+binnedplot(fitted(fit.3), resid(fit.3, type = "response")) 
+## Q-Q Plot
+qqnorm(resid(fit.3), main="Q-Q plot for conditional residuals")
+abline(0, 1)
+
+## "Q-Q plot for the random intercept"
+qqnorm(ranef(fit.3)$neighbourhood$`(Intercept)`, 
+       main="Q-Q plot for the random intercept")
+
+# Posterior predictive checking
+# cf<-fixef(fit.3)
+# coefhat<-as.matrix(coef(fit.3)$neighbourhood)
+# sigma.y.hat<-sigma.hat(fit.3)$sigma$data
+# sigma.a.hat<-sigma.hat(fit.3)$sigma$neighbourhood
+
+```
+\par
+From the binned residual plot, there are still a few of points outside of the grey line area, which means this model may be not able to capture 95% of our data.\par
+
+# Discussion
+## Implication
+Through EDA, text mining and modeling of the data from Airbnb insights, most people tend to give better rating scores to their living experience and service from Airbnb hosts. Also, the number of positive comments is much larger than negative comments.\par
+What factors affect people when they determine give how many stars to a hotel or B&B? Through the analysis, I ‘ve found that the demographic location, room types are good indicators and hosts are good indications. Specifically, in the Boston city, Downtown and Chinatown are not good choices to live, apartments and private rooms are more popular than hotel rooms. The most intuitionistic plots have shown this trend; moreover, from the word cloud of comments, the most negative comments are about noise, the most positive comments have reflected that Airbnb users love a clean and a quiet place. All of these suggest that people are not that much care about the downtown location, possibly because Airbnb users are looking for someplace to live for serval days or months, not just stop by or for business purposes. In the traditional hotel industry, people pay more attention to the convenience of transportation or the location near to the downtown area, where companies clustered. Do not forget. a title of a super host always gets higher ratings.\par
+Tips for Airbnb users:1. Choose an apartment or private house, it may give you better service and living quality. 2. The super host is not a bad choice, because their interaction with the official Airbnb platform may force them to provide better service. 3. If you come to Boston, not for business, Charlestown, Brighton, Roslindale, Jamaica Plain might become better choices for you.  4. Pay attention to the number of reviews, do not trust a 5.0 star’s house only have 1 or 2 reviews.\par
+Suggestions for the first clients of Airbnb (property hosts): 1. Try to become a super host  2. Response more and faster.  3. Do not do hotels, you will not find your target travelers and you are not able to compete with brand hotels.  4.Provide the service as best as you can, sufficient numbers of good reviews will bring you more and more customers in the future. \par
+
+## Limitation & Future Direction
+In this project, I have not yet answered the question that I have proposed:  “Do previous comments affect new costumers?” since such analysis follows a completely data-wrangling method, which will mess up the current dataset, but it can be done in the future and I’ ll completed that because it’s an interesting topic which could provide insights for both Airbnb users and Airbnb hosts. Also, I have not figured out how to do seasonality trends for the rating scores because the list only gives average ratings for each individual property. If there is a rating score in the comments dataset with a specific date, this could have been finished. Instead, I did the sentiment analysis and found that the comments tend to become less positive over time.\par
+In the part of the modeling and statistical analysis, several models are used and they can tell stories. However, I hope I can have more tricks to analysis the model and the goodness of fit in the future.
+
+# Referece
+[1] Gelman, Andrew, and Jennifer Hill. Data Analysis Using Regression and Multilevel/Hierarchical Models. Cambridge University Press, 2017.\par
+[2] Ludwig Fahrmeir, Thomas Kneib, Stefan Lang, Brian Marx. Regression Models, Methods and Applications.\par
+[3] Sarang Gupta. Airbnb Rental Listings Dataset Mining. https://towardsdatascience.com/airbnb-rental-listings-dataset-mining-f972ed08ddec \par
+
+\newpage
+# Appendix
+## Other EDAs 
+1) Relationship of Price and Rating
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+tidy_price$ratings <- as.numeric(tidy_price$ratings)
+
+g1<-tidy_price %>%
+  ggplot(aes(ratings_original,price))+
+  geom_smooth(method="lm", se=F,na.rm = T) + 
+  geom_count(na.rm = T) + ylim(c(0,1000))
+
+g2<-tidy_price %>%
+  ggplot(aes(ratings_original,cleaning_fee))+
+  geom_smooth(method="lm", se=F,na.rm = T)+
+  geom_count(na.rm = T)
+
+ggMarginal(g1, type = "histogram", fill="transparent")
+ggMarginal(g1, type = "boxplot", fill="transparent")
+
+```
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+ggMarginal(g2, type = "histogram", fill="transparent")
+ggMarginal(g2, type = "boxplot", fill="transparent")
+
+```
+\par
+This analysis focuses on the original rating scores (0-100 scores). There’s no obvious pattern indicating that price will affect the ratings or living experience. However, from the plot of service fee vs rating, we could examine that between 90 and 100 scores, there are more points representing a higher cleaning fee, possibly because of higher cleaning fees means better service, therefore better feedback from customers. \par
+
+2) Number of reviews may also be a good indication
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+ggplot(tidy_reviews,aes(number_of_reviews,ratings_original))+
+  geom_count(alpha=.5)
+
+```
+\par 
+Intuitively, higher ratings with more reviews are usually the best selections and the number of these top selections is usually very small. In this part, take a look at the plot, high ratings are clustered at the top left of the plot, which is also the points of rooms with fewer reviews. Only a few points have 90 or higher scores with 400+ reviews. \par
+
+3) Whether strict plices affect the living experience and ratings?
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+ggplot(tidy_polices,aes(cancellation_policy,ratings_original)) +
+  geom_point() +
+  geom_boxplot()
+  
+```
+\par 
+There's no indications in this part, so that exclue this part in model buildings.\par
+
+## Other text Analysis of Reviews
+1) The total number of negative and positive reviews
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+comments_sentiment <- tidy_comments %>% 
+  inner_join(get_sentiments("bing"),by="word")
+
+ggplot(comments_sentiment,aes(sentiment,fill=factor(sentiment)))+
+  geom_bar()+
+  labs(x = "Negative/Positive Review", y = "Total number", title = "Hsitorgram of Total Number of Negative and Positive Reviews")
+
+```
+\par There are more positive feedbacks than negative feedbacks for the Airbnb in the Great Boston Area. \par
+
+2) Wordclouds reviews
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+
+tidy_comments %>% 
+  dplyr::count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+
+comments_sentiment %>% 
+  dplyr::filter(sentiment=='positive') -> positive_sentiment
+
+positive_sentiment %>% dplyr::count(word) %>% 
+  with(wordcloud(word, n, max.words = 100))
+
+comments_sentiment %>% 
+  dplyr::filter(sentiment=='negative') -> negative_sentiment
+  
+negative_sentiment %>% dplyr::count(word) %>% 
+  with(wordcloud(word, n, max.words = 100))
+  
+# top 10 words in negative and positive reviews
+top_words <- comments_sentiment %>%
+  dplyr::count(word,sentiment) %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word=reorder(word,n))
+
+top_words %>% ggplot(aes(word,n,fill=sentiment)) +
+  geom_col(show.legend = F) +
+  facet_wrap(~sentiment,scales = "free")+
+  coord_flip()
+
+```
+
+3) To see if the comments and descriptions are related to the ratings
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+# intuitively, higher ratings have good comments
+tidy_comments_reviews <- left_join(tidy_comments,tidy_reviews,by="id") %>%
+  inner_join(get_sentiments("bing"),by="word")
+  
+tidy_comments_reviews %>% 
+  dplyr::count(ratings,sentiment) %>%
+  spread(sentiment,n) %>%
+  mutate(total=negative+positive) %>%
+  mutate(pos_perc=positive/total) %>%
+  ggplot(aes(ratings,pos_perc)) + 
+  geom_point(size=3,na.rm = T) +
+  geom_segment(aes(x=ratings,xend=ratings,y=0.25,yend=pos_perc),na.rm = T)+
+  labs(title="Lollipop Chart", 
+       subtitle="ratings Vs percentage of postive comments") + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6))
+
+# also interested in the description 
+tidy_description_reviews <- left_join(tidy_description,tidy_reviews,by="id") %>%
+  inner_join(get_sentiments("bing"),by="word")
+  
+tidy_description_reviews %>% 
+  dplyr::count(ratings,sentiment) %>%
+  spread(sentiment,n) %>%
+  mutate(total=negative+positive) %>%
+  mutate(pos_perc=positive/total) %>%
+  ggplot(aes(ratings,pos_perc)) + 
+  geom_point(size=3,na.rm = T) +
+  geom_segment(aes(x=ratings,xend=ratings,y=0.25,yend=pos_perc),na.rm = T)+
+  labs(title="Lollipop Chart", 
+       subtitle="ratings Vs percentage of postive decriptions") + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6))
+
+```
+\par The lollipop chart shows that higher scores tend to have higer positive percentage of comments. However, it seems that rating scores have no obvious relationship with the positive percentage of comments of house descriptions.\par
+
+## Take a look the models
+1) Multinonial model.\par
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+arm::display(fit.1)
+```
+\par
+2) Binomial Model.\par
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+arm::display(fit.2)
+```
+\par
+The price and the clearning fee do not have much effect on the ratings.The positive comment percentage is highly correlated to positive feedbacks. The coeficient of other variables have changed when it becomes binary outcomes. In this model, the room type hotel indicate that it will decreases the chances that a costumer gives a good feedback, which corresponds to the EDA results. Also, if the host is a super host and response more, the chance of getting a good feedback increases 2 times. It seems that this model is more accurate than the multinomial model\par
+3) Binomial regression with random effect.\par
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+arm::display(fit.3)
+```
+\par When introduce the random effect, the model improves.First of all, $\sigma_{\alpha}^2 : \sigma_{y}^2 = 0.28^2 : 1^2 = 0.0784$, that means the pooling effect is strong, i.e.there are group difference between neighbourhoods. Besides, the deviance is slightly lower than the previous model.\par
+4) Linear regression model.\par
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+arm::display(fit.4)
+```
+\par The simple linear regression model also makes sense on its' coefficients.\par
+5) Linear model with random effect.\par
+```{r, warning = FALSE, error = FALSE, echo =FALSE}
+arm::display(fit.5)
+```
+\par Still, the model including random effect has strong group effect, which means neighbourhood might be an important factor that affect the ratings and living experience. $\sigma_{\alpha}^2 : \sigma_{y}^2 = 0.33^2 : 4.98^2 = 0.004391058$;\par
+
+

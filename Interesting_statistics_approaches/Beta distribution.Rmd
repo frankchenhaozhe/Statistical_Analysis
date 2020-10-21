@@ -1,0 +1,138 @@
+---
+title: "Midterm Projects"
+author: "Haozhe Chen"
+date: "3/6/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Hand Sanitizer   
+\par After installing hand sanitizer dispensers, a hospital undertakes an educational program for 23 nurses on the importance of using hand sanitizer before entering patient rooms. The nurses’ use of hand sanitizer is observed before and after the training. Before the educational program nurses were observed visiting 51 patient rooms, and they used sanitizer only 13 times. Assume that p is the probability that a nurse uses hand sanitizer two months after the training. The success of the program will be evaluated by comparing p with 13/51, which is the proportion of visits where hand sanitizer was used before the educational program.    
+\par Two months after the training, the nurses were observed visiting 56 patient rooms, and they used sanitizer in 50 of the 56 visits. 
+\par Calculate the posterior pdf for p using two prior distributions for p:   
+
+\qquad 1. $p \sim U(0,1)$, which might be more conveniently expressed as a beta distribution.   
+
+\qquad 2. $p \sim Beta(13, 38)$, which has mean = 13/51.    
+
+\par Produce a short presentation of the study and its results. Include a plot of the posterior pdf’s of p labeled by prior.    
+
+\qquad Let x be the usage of sanitizer our of n visiting rooms with probability of p in each time. Then $X\sim Binomial(N,p)$.    
+
+\qquad From the Bayes' theorem, we know that $P(A|B)=\frac{P(B|A)P(A)}{P(B)}$.   
+$$Posterior \propto Lkelihood \times Prior$$   
+
+\qquad Thus $P(p|x)\propto P(x|p)P(p)$.  
+$$P(x|p)=\begin{pmatrix}
+n \\
+x
+\end{pmatrix}p^x(1-p)^{n-x}$$   
+
+If the prior of p is a Beta distribution with $\alpha$ and $\beta$, then
+$$P(p)=\frac{\Gamma(\alpha+\beta)}{\Gamma(\alpha)\Gamma(\beta)}p^{\alpha-1}(1-p)^{\beta-1}$$
+Since that,
+$$P(p|x)\propto P(x|p)P(p)$$
+And that,
+$$P(x|p)P(p)=\begin{pmatrix}
+n \\
+x
+\end{pmatrix}p^x(1-p)^{n-x}\frac{\Gamma(\alpha+\beta)}{\Gamma(\alpha)\Gamma(\beta)}p^{\alpha-1}(1-p)^{\beta-1}$$
+Then,
+$$P(p|x)\propto p^x(1-p)^{n-x}p^{\alpha-1}(1-p)^{\beta-1}$$
+Then,
+$$P(p|x)\propto p^{\alpha+x-1}(1-p)^{\beta+n-x-1}$$
+
+\qquad Thus the posterior of p follows a Beta distribution with $Beta(\alpha+x,\beta+n-x)$ given that the prior of p follows a Beta distribution of $Beta(\alpha, \beta)$.
+
+\qquad (1) $p \sim U(0,1)= Beta(1,1)$, $n=56$, $x=50$.   
+
+In this process, the posterior of p is $p\sim Beta(51,7)$.    
+
+Thus the pdf of postoerior $p\sim Beta(51,7)$ is 
+$$P(p|x,n)=\frac{\Gamma(51+7)}{\Gamma(51)\Gamma(7)}p^{51-1}(1-p)^{7-1}=\frac{\Gamma(58)}{\Gamma(51)\Gamma(7)}p^{50}(1-p)^{6}=\frac{57!}{50!6!}p^{50}(1-p)^{6}$$
+
+The plot of the posterior pdf of p is:   
+```{r}
+rangeP<- seq(0, 1, length=1000)
+post<- (factorial(57)/(factorial(50)*factorial(6)))*rangeP^(50)*(1-rangeP)^(6)
+plot(x=rangeP, y=post, type="l", xlab="p", ylab="Posterior pdf of p")
+```
+
+\qquad (2) $p \sim Beta(13,38)$, $n=56$, $x=50$.   
+
+Similarly, we have that the posterior of p is $p\sim Beta(13+50,38+56-50)=Beta(63,44)$.    
+
+Then the pdf of postoerior $p\sim Beta(63,44)$ is 
+$$P(p|x,n)=\frac{\Gamma(63+44)}{\Gamma(63)\Gamma(44)}p^{63-1}(1-p)^{44-1}=\frac{\Gamma(107)}{\Gamma(63)\Gamma(44)}p^{62}(1-p)^{43}=\frac{106!}{62!43!}p^{62}(1-p)^{43}$$
+
+The plot of the posterior pdf of p is:   
+```{r}
+rangeP<- seq(0, 1, length=1000)
+post<- (factorial(106)/(factorial(62)*factorial(43)))*rangeP^(62)*(1-rangeP)^(43)
+plot(x=rangeP, y=post, type="l", xlab="p", ylab="Posterior pdf of p")
+```
+
+
+## Irrigation -- Those green circles
+\par Center Pivot Irrigation Systems are throughout the world and in about half the sprinkler irrigation
+systems in the U.S. Even if you haven’t seen one up close, you have probably seen them from the air
+due to the distinctive visual pattern they create.
+
+\par In simple terms, the system consists of a large arm, like the one pictured above, comprised of spans and
+towers. The arm is connected to a pivot point which provides power, water, and chemicals. The towers
+have powered wheels that propel the arm slowly around the pivot as water and chemicals are applied to
+the crops at controlled rates. Power required for each tower is about 1HP.
+
+\par In the U.S., the large rotating arm is typically 1320 feet long (1/4 of a mile (440 yards) to the outer
+wheels. As shown in the picture above, there is usually an end-gun that extends about 100 feet beyond
+the outer wheels. Typical full rotation around the pivot takes slightly less than a day.
+
+\par Center pivot systems are operated with a minimum amount of supervision, monitored with just a few
+simple statistics. One statistic is the rotation speed of the system. Although the speed is not directly
+observed, full rotation time for the system provides a way to calculate average rotation speed.
+
+\par The file rot35.txt contains the rotation times for an irrigation system.
+
+\par Calculate a 90% confidence interval for the speed of the rotating arm at the outer wheels.
+
+\par Prepare a short explanation of your analysis for an audience that includes both data scientists and
+farmers. 
+```{r}
+# load the data of rotation angular velocity
+v = scan('rot.txt')
+```
+\qquad The histgram of the angular velocity
+```{r}
+hist(v)
+```
+\qquad The 90% confidence interval of the angular velocity is given by,
+$$(\mu_v - z_{\alpha/2}\frac{\sigma_v}{\sqrt{n}}，\mu_v + z_{\alpha/2}\frac{\sigma_v}{\sqrt{n}})$$
+```{r}
+n = length(v)
+m = mean(v)
+s = sd(v)
+lower = m - qnorm(0.95)*s/(sqrt(n))
+upper = m + qnorm(0.95)*s/(sqrt(n))
+print(paste0("Confidence interval of the angular velocity is: (", 
+             format(round(lower, 5), nsmall = 2), " mph, ",
+             format(round(upper, 5), nsmall = 2)," mph)" ))
+```
+\qquad Since the linear velocity  = angular velocity  *  radius and the angular velocity = (2*pi / rotation time)  radians per hour, and rotation time = 1/4,
+```{r}
+speedlower = 2*pi/upper * 0.25
+speedupper = 2*pi/lower * 0.25
+print(paste0("The Confidence interval for speed of the rotating arm at the outer wheels is: (", 
+             format(round(speedlower, 5), nsmall = 2), " mph, ",
+             format(round(speedupper, 5), nsmall = 2)," mph)" ))
+
+```
+
+
+
+
+
+
+

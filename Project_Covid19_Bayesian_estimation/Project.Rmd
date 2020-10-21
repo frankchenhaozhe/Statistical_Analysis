@@ -1,0 +1,288 @@
+---
+title: "Bayesian estimation of COVID-19 pandemic"
+output: html_document
+author: Haozhe Chen 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(rstan,magrittr,ggplot2,tidyverse,readr,lubridate,anytime,tidyr,kableExtra)
+```
+
+# Introudction
+A lot of people infected with the COVID-19 virus will only experience mild illness without requiring special treatment, some even don’t have symptoms. Understand the potential infections is crucial for the prevention of the disease. 
+
+In this project, I have explored the real infections and the positive diagnosis, along with the fatality rate. I used a Bayesian approach to set up the priors for certain parameters and then implemented a STAN model to produce the posterior. 
+
+The data I have used started from 02-23 when the tested infections began and I keep updating them every day as long as the new data are available online. 
+
+# Method
+
+Define key quantity
+
+* $I_t$, the _true_ number of new infections at day $t$.
+
+Here are the key observed quantities 
+
+* $c_t$, the _reported_ number of new cases at day $t$, and
+* $d_t$, the _reported_ number of new deaths at day $t$.
+
+Assume a growth model with slow-down of the form
+
+$$
+  I_t = I_0 \exp((\alpha_0 - \beta t) t)
+$$
+with a starting number of infected people, $I_0$, and a dynamicaly decreasing growth rate $\alpha_0-\beta t$.
+
+Now consider the testing process, and the process by which people die of the desease as random processes with fixed probability. The probability that a person with an infection gets tested is $\gamma$, and the probability that an infected person dies is $\delta$. We need two more parameters for our sampling processes, which are $\tau_t$, the average time between infection and test, and $\tau_\delta$, the average time between infecton and death. We can then have the following binomial sampling probabilities:
+
+$$
+  \begin{split}
+  c_t &\sim \text{Bin}(c_t; I_{t-\tau_t}, \gamma)\\
+  d_t &\sim \text{Bin}(d_t; I_{t-\tau_\delta}, \delta)
+  \end{split}
+$$
+
+In summary, the key parameters are, together with short descriptions and prior information:
+
+| Parameter     | Description                      | Prior         |
+|---------------|----------------------------------|---------------|
+| $I_0$         | Starting nr of infected people   | $[0, \infty)$ |
+| $\alpha_0$    | Exp. starting growth rate        | $[0, \infty)$ |
+| $\beta$       | Slow-down rate                   | $[0, \infty)$ |
+| $\gamma$      | Prob. to get tested              | $[0,1]$       |
+
+
+
+In addition, the following parameters are fixed:
+
+| Parameter     | Description                      | Value     |
+|---------------|----------------------------------|-----------|
+| $\tau_t$      | Time from infection to  test     | 7         |
+| $\tau_\delta$ | Time from infection to death     | 17        |
+| $\delta$      | Death rate                       | 0.03      |
+
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+
+us_covid19_daily <- read_csv("us_covid19_daily.csv")
+
+us_covid19_daily %<>% select(date, positive, negative, recovered, death, totalTestResults, positiveIncrease, negativeIncrease, totalTestResultsIncrease,deathIncrease)
+us_covid19_daily <- us_covid19_daily[112:1, ]
+us_covid19_daily[is.na(us_covid19_daily)] <- 0
+us_covid19_daily %<>% mutate(date = anydate(date))
+us_covid19_daily %<>% dplyr::filter(date >= as.POSIXct("2020-02-23") &
+                                    date <= as.POSIXct("2020-05-02"))
+
+us_covid19_daily %>%
+  dplyr::select(date, positiveIncrease, deathIncrease) %>%
+  dplyr::mutate(deathIncrease = 10*deathIncrease) %>%
+  tidyr::pivot_longer(c(positiveIncrease, deathIncrease), names_to="type", values_to = "Count") %>%
+  ggplot() + geom_point(mapping = aes(x = date, y = Count, col=type)) 
+```
+
+In order to compare the lags, the daily death increase were scaled by 10. 
+So, this reveals a lag of about 10 days between the onset of exponential growth between test cases and deaths. With around 17 days from infection to death (see [this post](https://medium.com/@tomaspueyo/coronavirus-act-today-or-people-will-die-f4d3d9cd99ca)), this yields an average time of 7 days between infection and reported test case, justifying my choice for $\tau_t=7$. In terms of  $\delta$, the death rate, was set to be 3%, according to the historical death rate in China.
+
+
+So the likelihood of the data given the model simply as the product of all these binomial probabilities across all time points where possible. So:
+
+$$
+  \mathcal{L} = \prod_t \text{Bin}(c_t; I_{t-\tau_t}, \gamma) \prod_t\text{Bin}(d_t; I_{t-\tau_\delta}, \delta) 
+$$
+where the products run over all days for which we have know $c_t$ or $d_t$, respectively.
+
+This then allows us to compute posterior distributions of all parameters using Monte Carlo sampling, as for example implemented in the package [Stan](https://mc-stan.org/rstan/).
+
+# Analysis
+
+First defined the model in [STAN](https://mc-stan.org) and store it as `covid19.stan`.
+Then prepared the input for the model:
+
+| Input    | Description                                  |
+|----------|----------------------------------------------|
+| day      | days from 1 to 70                            |
+| cases    | the number of increased positive diagnose    |
+| deaths   | Death rate                                   |
+| N        | number of days                               |
+
+```{r include=FALSE}
+day <- as.numeric(difftime(us_covid19_daily$date, as.Date("2020-02-23"), units="days"))
+cases <- us_covid19_daily$positiveIncrease
+deaths <- us_covid19_daily$deathIncrease
+N <- length(cases)
+tau_t <- 7
+tau_delta <- 17
+delta <- 0.03
+alpha0 <- 0.1
+beta <- 0.05
+I0 <- 10
+gamma <- 0.5
+
+```
+
+We then run the model and sampled from the posterior 
+
+```{r include=FALSE}
+ls <- list(day=day,cases=cases,deaths=deaths,N=N,tau_t=tau_t,tau_delta=tau_delta,delta=delta)
+init <- function(){
+  list(gamma = gamma, alpha0 = alpha0, beta = beta, I0 = I0)
+}
+model <- stan('covid19.stan', data = ls, init = init)
+stan_output <- model %>% as.data.frame()
+```
+
+Take a look at marginal summary statistics for each parameter
+```{r echo=FALSE}
+output <- stan_output %>%
+  tidyr::pivot_longer(c('I0', 'alpha0', 'beta', 'gamma'),
+                      names_to = "param",
+                      values_to = "value") %>%
+  dplyr::group_by(param) %>%
+  dplyr::summarise(perc5 = quantile(value, 0.05),
+                   perc50_median = median(value),
+                   perc95 = quantile(value, 0.95))
+kable(output,
+      booktabs = T,align = "c",digits = 3)%>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+Here are correlations between these posteriors:
+```{r message=FALSE,echo=FALSE}
+stan_output %>%
+  dplyr::select(I0, alpha0, beta, gamma) %>%
+  GGally::ggpairs()
+```
+
+This is all reasonable and more or less expected given the model set up. For example, the correlation between $\alpha_0$ and $\beta$ is expected (you can afford to have steeper growth in the beginning if you have a stronger slow-down). 
+
+## Visualising the model
+
+OK, here are the model predictions
+
+So we can use the many samples from our posterior to check some predictions. First, we prepare the model predictions in a new table `plot_curves`:
+
+```{r include=FALSE}
+growth_func <- function(I0, alpha0, beta, t) {
+  return(I0 * exp(t * (alpha0 - beta * t)))
+}
+
+day_tbl <- tibble::tibble(days = 0:70) %>%
+ dplyr::mutate(date = as.POSIXct("2020-02-23") + lubridate::days(days))
+
+plot_curves <- stan_output %>%
+  dplyr::select(alpha0, gamma, beta, I0) %>%
+  dplyr::mutate(id=1:nrow(stan_output)) %>%
+  tidyr::expand_grid(day_tbl) %>%
+  dplyr::mutate(true_cases = growth_func(I0, alpha0, beta, days),
+                predicted_testcases = gamma * growth_func(I0, alpha0, beta, days - 7),
+                predicted_deaths = 0.01 * growth_func(I0, alpha0, beta, days - 17)) %>%
+  dplyr::group_by(id) %>%
+  dplyr::mutate(cum_true_cases = cumsum(true_cases),
+                cum_predicted_testcases = cumsum(predicted_testcases),
+                cum_predicted_deaths = cumsum(predicted_deaths)) %>%
+  dplyr::ungroup()
+
+plot_curves %<>%
+  dplyr::group_by(date) %>%
+  dplyr::summarise(
+    true_cases_5 = quantile(true_cases, 0.05),
+    true_cases_95 = quantile(true_cases, 0.95),
+    predicted_testcases_5 = quantile(predicted_testcases, 0.05),
+    predicted_testcases_95 = quantile(predicted_testcases, 0.95),
+    predicted_deaths_5 = quantile(predicted_deaths, 0.05),
+    predicted_deaths_95 = quantile(predicted_deaths, 0.95)
+  ) 
+
+plot_curves1 <- cbind(plot_curves[-1,], us_covid19_daily[,-1])
+
+```
+
+We can then plot the posteriors as a function of time together with the data:
+
+```{r echo=F, warning=FALSE}
+  ggplot(plot_curves1) +
+    geom_ribbon(aes(date, ymin = true_cases_5, ymax=true_cases_95), fill='green', alpha=0.5) +
+    geom_ribbon(aes(date, ymin = predicted_testcases_5, ymax=predicted_testcases_95),fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(date, ymin = predicted_deaths_5, ymax=predicted_deaths_95),fill = "red", alpha = 0.5) +
+    geom_point(aes(date, y = positiveIncrease), col = "blue") +
+    geom_point(aes(date, y = deathIncrease), col = "red") +
+    theme_minimal() +
+    ggtitle("Bayesian model predictions") +
+    theme(axis.title.x=element_blank(),
+          axis.title.y=element_blank()) +
+    annotate("text", x = as.POSIXct("2020-03-17"), y = 5e4, label = "true infections\n(given 3% fatality rate)", col="green") +
+    annotate("text", x = as.POSIXct("2020-04-7"), y = 4e4, label = "tested positive", col="blue") +
+    annotate("text", x = as.POSIXct("2020-04-25"), y = 5000, label = "deaths", col="red") 
+
+```
+
+```{r echo=F, warning=FALSE}
+  ggplot(plot_curves1) +
+    geom_ribbon(aes(date, ymin = true_cases_5, ymax=true_cases_95), fill='green', alpha=0.5) +
+    geom_ribbon(aes(date, ymin = predicted_testcases_5, ymax=predicted_testcases_95),fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(date, ymin = predicted_deaths_5, ymax=predicted_deaths_95),fill = "red", alpha = 0.5) +
+    geom_point(aes(date, y = positiveIncrease), col = "blue") +
+    geom_point(aes(date, y = deathIncrease), col = "red") +
+    scale_y_log10(labels = function(x) format(x, big.mark = ",", scientific = FALSE),
+                  breaks = c(1, 10, 100, 1000, 10000, 100000),
+                  limits = c(1, 1e5)) +
+    theme_minimal() +
+    ggtitle("Bayesian model predictions (Y- log(10) scale)") +
+    theme(axis.title.x=element_blank(),
+          axis.title.y=element_blank()) +
+    annotate("text", x = as.POSIXct("2020-03-5"), y = 5e4, label = "true infections\n(given 3% fatality rate)", col="green") +
+    annotate("text", x = as.POSIXct("2020-03-4"), y = 1e3, label = "tested positive", col="blue") +
+    annotate("text", x = as.POSIXct("2020-03-25"), y = 10, label = "deaths", col="red") 
+
+```
+
+
+```{r include=FALSE}
+ggsave("model_predictions.png", width = 8, height = 5)
+```
+
+We can convert the growth rate into a doubling time and plot that as well:
+```{r echo=F, warning=FALSE}
+doubling_time <- function(alpha0, beta, t) {
+  return (log(2) / (alpha0 - beta * t))
+}
+
+day_tbl <- tibble::tibble(days = 0:45) %>%
+  dplyr::mutate(date = as.POSIXct("2020-02-23") + lubridate::days(days))
+dt_curves <- stan_output %>%
+  dplyr::select(alpha0, beta) %>%
+  dplyr::mutate(id=1:nrow(stan_output)) %>%
+  tidyr::expand_grid(day_tbl) %>%
+  dplyr::mutate(dt = doubling_time(alpha0, beta, days))
+
+dt_curves %>%
+  dplyr::group_by(date) %>%
+  dplyr::summarise(dt5 = quantile(dt, 0.05), dt50 = quantile(dt, 0.5), dt95 = quantile(dt, 0.95)) %>%
+ggplot() +
+  geom_ribbon(mapping = aes(x = date, ymin = dt5, ymax=dt95), alpha=0.5) +
+  geom_line(mapping = aes(x = date, y = dt50)) + 
+  theme_minimal() +
+  ggtitle("Modelling of doubling time (in days)") +
+  theme(axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  geom_vline(xintercept = as.POSIXct("2020-04-01"))
+```
+
+```{r include=FALSE}
+ggsave("doubling_time.png", width=8, height=5)
+```
+
+
+# Discussion
+
+First, I think it's nice to see that this problem is tractable for a full Bayesian approach. Second, I think it's nice that it seems there is a systematic way to extract information from all the numbers, including deaths and cases, not just one of them separately.
+
+However, these analyses also show that the simple exponential model is insufficient. There are certainly rate changes, visible both in the tested cases and in the death cases. It would be nice to amend the model to be more "free"... perhaps some kind of hierarchical model that puts some constraint on the increase of infections, but allows for changes. Not trivial.
+
+
+
+
+
+

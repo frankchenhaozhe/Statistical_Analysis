@@ -1,0 +1,145 @@
+---
+title: "Bayesian Inference"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Likelihood functions
+```{r}
+# binomial likelihood
+likelihood <- function(n, y, theta){
+  likelihood <- theta^y*(1-theta)^(n-y)
+  return(likelihood)
+}
+
+theta <- seq(0.01, 0.99, by = 0.01)
+plot(theta,likelihood(400, 72, theta), main = 'Binomial Likelihood')
+abline(v = 72/400)
+
+# log likelihood
+loglik <- function(n, y, theta){
+  loglik <- y*log(theta)+(n-y)*log(1-theta)
+  return(loglik)
+}
+plot(theta, loglik(400,72,theta), type = 'l', main = 'Log Likelihood')
+abline(v = 72/400)
+```
+
+## Prior, Likelihood, Posterior
+```{r}
+# the paramter of binomial
+theta <- seq(0.01, 0.99, by = 0.01)
+
+# likelihood distribution (observed data)
+lik <- dbinom(8, size = 10, theta)
+plot(theta, lik, type = "l", xlab = "P(sucess)", ylab = "Density")
+
+# prior distribution (the belief)
+prior <- dnorm(theta, mean = .5, sd = .1)
+lines(theta, prior/15, col = "red") # scale the prior
+
+# the unstardardised posterior
+lik.x.prior <- lik * prior
+lines(theta, lik.x.prior, col = "green")
+
+# the stardardised posterior distribution
+posterior <- lik.x.prior / sum(lik.x.prior)
+lines(theta, posterior, col = "blue")
+
+legend("topleft", legend = c("Lik", "Prior", "Unstd Post", "Post"),
+text.col = 1:4, bty = "n")
+
+```
+
+## Case1 --- Binomial Conjugate Analysis
+Suppose we are giving two students a multiple choice test with 40 questions, where each question has four choices. We don't know how much the students have studied for this exam, but we think that they will do better than just guessing randomly. 
+1) What are the paramters of interest?
+theta1=True, theta2=True, probabilities the students answer a question correctly. 
+
+2) What is our likelihood?
+Bin(40, theta)
+
+3) What prior should we use?
+The conjugate prior is a beta prior, try the following priors
+```{r}
+theta <- seq(0,1,by=0.01)
+plot(theta, dbeta(theta, 1, 1), type = 'l')
+plot(theta, dbeta(theta, 4, 2), type = 'l')
+plot(theta, dbeta(theta, 8, 4), type = 'l')
+# from the plots, prior ~ beta(8,4) makes more sense
+
+```
+
+4) What is the prior probability P(theta>0.25)? P(theta>0.5)? P(theta>0.8)?
+find the probabilities using pbeta() function. 
+```{r}
+1-pbeta(0.25,8,4)
+1-pbeta(0.75,8,4)
+1-pbeta(0.8,8,4)
+```
+
+5) Suppose the first student gets 33 questions right. What is the posterior distribution for theta1? P(theta1>0.25)? P(theta1>0.5)? P(theta1>0.8)? What is the 95% posterior credible interval for theta1?
+```{r}
+# posterior ~ beta(8+33, 4+40-33) = beta(41, 11)
+(8+33)/(8+4+40) # posterior mean
+33/40 # MLE
+
+plot(theta, dbeta(theta, 41, 11), type = 'l', col = "blue") # posterior
+lines(theta, dbeta(theta, 8,4),col = "red") # prior
+lines(theta, 44*dbinom(33, size = 40, theta), col = "green") # scaled likelihood (observed) 
+legend("topleft", legend = c("Prior", "Scaled Likelihood", "Post"),text.col = 2:4, bty = "n")
+
+# posterior probabilities
+1 - pbeta(0.25, 41, 11)
+1 - pbeta(0.5, 41, 11)
+1 - pbeta(0.8, 41, 11)
+
+# two-taild posterior credible interval
+qbeta(0.025, 41, 11)
+qbeta(0.975, 41, 11)
+```
+
+6) Suppose the second student gets 24 questions right. What is the posterior distribution for theta2? P(theta2>0.25)? P(theta2>0.5)? P(theta2>0.8)? What is the 95% posterior credible interval for theta2?
+```{r}
+# posterior ~ beta(8+24, 4+40-24) = beta(32, 20)
+(8+24)/(8+4+40) # posterior mean
+24/40 # MLE
+
+plot(theta, dbeta(theta, 32, 20), type = 'l', col = "blue") # posterior
+lines(theta, dbeta(theta, 8,4),col = "red") # prior
+lines(theta, 44*dbinom(24, size = 40, theta), col = "green") # scaled likelihood (observed) 
+legend("topleft", legend = c("Prior", "Scaled Likelihood", "Post"),text.col = 2:4, bty = "n")
+
+# posterior probabilities
+1 - pbeta(0.25, 32, 20)
+1 - pbeta(0.5, 32, 20)
+1 - pbeta(0.8, 32, 20)
+
+# two-taild posterior credible interval
+qbeta(0.025, 32, 20)
+qbeta(0.975, 32, 20)
+```
+
+7) What is the posterior probability that theta1>theta2 i.e., that the first student has a better chance of getting question right than the second student. 
+```{r}
+# use simlutation
+theta1 <- rbeta(1000, 41, 11)
+theta2 <- rbeta(1000, 32, 20)
+mean(theta1 > theta2)
+# Therefore, the probability of the first student has a better chance of getting question right than the second student is 97.3%
+```
+
+
+
+
+
+
+
+
+
+
+
+

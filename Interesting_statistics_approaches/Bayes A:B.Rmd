@@ -1,0 +1,127 @@
+---
+title: "Simple AB Testing"
+author: "Haozhe Chen"
+date: "3/25/2020"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+options(scipen=999, digits = 3)
+```
+
+## Introduction {.smaller}
+
+The classic binary-choice version of AB testing has been used in marketing for many years.
+
+Consider an example
+
+```{r}
+
+library(pwr)
+
+test1 <- tibble(Product = c("A","B"), Views = c(3450, 3000), Conversions = c(225, 250))
+
+test1
+
+```
+
+Are the conversion rates equal?
+
+## Simple test {.smaller}
+
+Ho: conversion rates are equal   
+H1: Not Ho  
+   
+```{r}
+
+prop.test(c(225, 250), c(3450, 3000))
+
+```
+
+We reject Ho.  
+   
+BUT What does this mean?  The test is limited to the visitors at the time of the test.  And, the outcome was a p-value.  It doesn't tell you how likely it is that B is similar to A or better than A. It doesn't tell you how much better B is than A.  
+
+## Get (at least a little) realistic {.smaller}
+
+If you're doing this kind of work, it probably isn't your "first rodeo."
+
+Let's restate the question in Bayesian terms:
+
+<div style="margin-left: 30px; font-size: small">
+
+A is the proposition.  B is the evidence.  
+P(A) is the prior probability of the proposition.  
+P(B)Is the prior proabability of the evidence.  
+P(B|A) is the likelihood. 
+P(A|B) is the posterior.
+
+Posterior = Likelihood * P(Prior proposition) / P(prior Evidence)  
+
+</div>
+
+
+
+## Uniform prior 1 {.smaller}
+
+```{r}
+
+library(bayesAB)
+
+A_binom <- rbinom(3450, 1, 0.065)
+B_binom <- rbinom(3000, 1, 0.083)
+
+
+plotBeta(1,1)
+
+```
+
+## Uniform prior 2 {.smaller}
+
+```{r}
+AB1 <- bayesTest(A_binom, B_binom,
+                 priors = c('alpha' = 1, 'beta' = 1),
+                 distribution = 'bernoulli')
+
+print(AB1)
+
+```
+
+## Uniform prior 3 {.smaller}
+
+```{r fig.width= 3.3, fig.height=2.7}
+
+plot(AB1)
+
+```
+
+
+## Beta Prior 1 {.smaller}
+
+```{r}
+
+plotBeta(100,200)
+
+```
+
+## Beta Prior 2
+
+```{r}
+
+AB2 <- bayesTest(A_binom, B_binom,
+                 priors = c('alpha' = 100, 'beta' = 200),
+                 distribution = 'bernoulli')
+print(AB2)
+
+```
+
+## Beta Prior 3 {.smaller}
+
+```{r fig.width= 3.3, fig.height=2.7}
+
+plot(AB2)
+
+```
